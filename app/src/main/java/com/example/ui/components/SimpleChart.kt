@@ -69,7 +69,8 @@ fun SimpleLineChart(
             val path = Path()
 
             percentages.forEachIndexed { i, p ->
-                val x = i * stepX
+                // در چیدمان راست‌چین (RTL)، قدیمی‌ترین آزمون (اندیس ۰) در سمت راست و جدیدترین در سمت چپ رسم می‌شود
+                val x = width - (i * stepX)
                 val normalizedY = (p / 100.0).toFloat().coerceIn(0f, 1f)
                 val y = height - (height * normalizedY)
 
@@ -98,7 +99,7 @@ fun SimpleLineChart(
         ) {
             Text("اولین آزمون", fontSize = 11.sp, color = Color.Gray)
             Text(
-                "آخرین: %${PersianUtils.toPersianDigits(percentages.lastOrNull() ?: 0.0)}",
+                "آخرین: ${PersianUtils.formatPercentage(percentages.lastOrNull())}",
                 fontSize = 11.sp,
                 color = JadePrimary
             )

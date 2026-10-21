@@ -51,9 +51,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainAppContent(viewModel: MainViewModel) {
     val currentScreen by viewModel.currentScreen.collectAsState()
-    val totalPoints by viewModel.totalUnlockedPoints.collectAsState()
     val settings by viewModel.appSettings.collectAsState()
-    val displayedScore = (settings?.totalScore ?: 0) + (totalPoints ?: 0)
+    val displayedScore = settings?.totalScore ?: 0
 
     val showBottomNav = currentScreen !is Screen.QuizActive
 
@@ -102,7 +101,7 @@ fun MainAppContent(viewModel: MainViewModel) {
                 )
                 is Screen.QuizActive -> QuizActiveScreen(
                     viewModel = viewModel,
-                    onCancel = { viewModel.navigateTo(Screen.Dashboard) }
+                    onCancel = { viewModel.cancelActiveQuiz() }
                 )
                 is Screen.QuizResult -> QuizResultScreen(
                     viewModel = viewModel,

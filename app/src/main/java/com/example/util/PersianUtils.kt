@@ -32,6 +32,19 @@ object PersianUtils {
     }
 
     /**
+     * قالب‌بندی استاندارد درصد با ۱ رقم اعشار گردشده، ممیز فارسی «٫» و علامت درصد «٪» در انتها (مثل ۷۳٫۳٪)
+     */
+    fun formatPercentage(percentage: Double?): String {
+        if (percentage == null || percentage.isNaN() || percentage.isInfinite()) {
+            return "۰٫۰٪"
+        }
+        val rounded = Math.round(percentage * 10.0) / 10.0
+        val formatted = String.format(java.util.Locale.US, "%.1f", rounded)
+        val withPersianComma = formatted.replace('.', '٫')
+        return "${toPersianDigits(withPersianComma)}٪"
+    }
+
+    /**
      * پیام خوشامدگویی متناسب با ساعت محلی دستگاه از طرف «برسام»
      */
     fun getBarsamGreeting(): Pair<String, String> {

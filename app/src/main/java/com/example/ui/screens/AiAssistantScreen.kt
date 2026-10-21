@@ -137,7 +137,7 @@ fun AiAssistantScreen(
                 selected = isComplexThinking,
                 onClick = { isComplexThinking = true },
                 leadingIcon = { Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                label = { Text("استدلال عمیق کنکور (Argon)", fontSize = 11.sp) },
+                label = { Text("استدلال عمیق", fontSize = 11.sp) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = JadePrimary,
                     selectedLabelColor = Color.White
@@ -147,7 +147,7 @@ fun AiAssistantScreen(
                 selected = !isComplexThinking,
                 onClick = { isComplexThinking = false },
                 leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                label = { Text("پاسخ سریع (Flash)", fontSize = 11.sp) },
+                label = { Text("پاسخ سریع", fontSize = 11.sp) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = AmberPrimary,
                     selectedLabelColor = Color.White

@@ -25,9 +25,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+class MainViewModel @JvmOverloads constructor(
+    application: Application,
+    private val database: BarsamDatabase = BarsamDatabase.getInstance(application)
+) : AndroidViewModel(application) {
 
-    private val database = BarsamDatabase.getInstance(application)
     val soundManager = SoundManager(application)
     val aiRepository = GeminiAssistantRepository(application, database.settingsDao())
 
@@ -106,9 +108,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var quizTimerJob: Job? = null
     private var quizEndSystemTime: Long = 0L
     private var activeQuizGrade: Int = 10
-    private var activeQuizTopic: String = "جامع"
-    private var activeQuizDifficulty: String = "متوسط"
+    private var activeQuizTopic: String = "همه مباحث"
+    private var activeQuizDifficulty: String = "همه سطوح"
     private var totalQuizSeconds: Int = 600
+    private var isQuizFinishing: Boolean = false
+
+    suspend fun getTopicsForGrade(grade: Int): List<String> {
+        return database.questionDao().getTopicsByGrade(grade)
+    }
+
+    suspend fun getAvailableQuizQuestionCount(grade: Int, topic: String?, difficulty: String?): Int {
+        val effectiveTopic = if (topic == "همه مباحث" || topic.isNullOrBlank()) null else topic
+        val effectiveDiff = if (difficulty == "همه سطوح" || difficulty.isNullOrBlank()) null else difficulty
+        return database.questionDao().getQuizQuestionsCount(grade, effectiveTopic, effectiveDiff)
+    }
 
     fun startCustomQuiz(
         grade: Int,
@@ -118,25 +131,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         durationMinutes: Int
     ) {
         viewModelScope.launch {
+            val effectiveTopic = if (topic == "همه مباحث" || topic.isNullOrBlank()) null else topic
+            val effectiveDiff = if (difficulty == "همه سطوح" || difficulty.isNullOrBlank()) null else difficulty
+
             val questions = database.questionDao().getQuizQuestions(
                 grade = grade,
-                topic = if (topic == "همه مباحث") null else topic,
-                difficulty = if (difficulty == "همه سطوح") null else difficulty,
+                topic = effectiveTopic,
+                difficulty = effectiveDiff,
                 limit = count
             )
-            val finalQuestions = if (questions.isNotEmpty()) {
-                questions
-            } else {
-                // اگر با فیلتر سوالی پیدا نشد، از سوالات عمومی پایه مربوطه انتخاب کن
-                BarsamQuestionBank.questions.filter { it.grade == grade }.take(count)
+
+            if (questions.isEmpty()) {
+                return@launch
             }
 
-            _activeQuestions.value = finalQuestions
+            isQuizFinishing = false
+            _activeQuestions.value = questions
             _currentQuestionIndex.value = 0
             _userAnswers.value = emptyMap()
             activeQuizGrade = grade
-            activeQuizTopic = topic ?: "جامع"
-            activeQuizDifficulty = difficulty ?: "متنوع"
+            activeQuizTopic = topic ?: "همه مباحث"
+            activeQuizDifficulty = difficulty ?: "همه سطوح"
             totalQuizSeconds = durationMinutes * 60
 
             // محاسبه زمان پایان بر اساس ساعت پیوسته سیستم جهت حفظ زمان در تغییر وضعیت
@@ -164,21 +179,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * انصراف قطعی از آزمون:
+     * تایمر لغو می‌شود، وضعیت سوال‌ها و پاسخ‌ها پاک می‌شود، و هیچ نتیجه یا مدالی ثبت نمی‌شود.
+     */
+    fun cancelActiveQuiz() {
+        quizTimerJob?.cancel()
+        quizTimerJob = null
+        isQuizFinishing = false
+        _activeQuestions.value = emptyList()
+        _userAnswers.value = emptyMap()
+        _remainingSeconds.value = 0
+        _currentQuestionIndex.value = 0
+        _latestQuizResult.value = null
+        _currentScreen.value = Screen.Dashboard
+    }
+
     fun selectQuizAnswer(questionIndex: Int, optionIndex: Int) {
         val currentAnswers = _userAnswers.value.toMutableMap()
-        val isFirstSelection = !currentAnswers.containsKey(questionIndex)
         currentAnswers[questionIndex] = optionIndex
         _userAnswers.value = currentAnswers
+        // بدون پخش صدای درست/غلط در جریان آزمون برای جلوگیری از لو رفتن پاسخ و تقلب
+    }
 
-        // پخش صدای پاسخ با بررسی صحت
-        val question = _activeQuestions.value.getOrNull(questionIndex)
-        if (question != null && isFirstSelection) {
-            if (optionIndex == question.correctOptionIndex) {
-                soundManager.playCorrectSound()
-            } else {
-                soundManager.playWrongSound()
-            }
-        }
+    fun clearQuizAnswer(questionIndex: Int) {
+        val currentAnswers = _userAnswers.value.toMutableMap()
+        currentAnswers.remove(questionIndex)
+        _userAnswers.value = currentAnswers
     }
 
     fun nextQuestion() {
@@ -194,7 +221,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun finishActiveQuiz() {
+        if (isQuizFinishing) return
+        isQuizFinishing = true
         quizTimerJob?.cancel()
+        quizTimerJob = null
+
         val questions = _activeQuestions.value
         val answers = _userAnswers.value
         var correctCount = 0
@@ -212,9 +243,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val unansweredCount = questions.size - (correctCount + wrongCount)
         val spentSeconds = totalQuizSeconds - _remainingSeconds.value
+        val answeredCount = correctCount + wrongCount
 
-        // محاسبه استاندارد درصد با احتساب یک‌سوم نمره منفی
-        val percentage = if (questions.isNotEmpty()) {
+        // محاسبه استاندارد درصد با احتساب یک‌سوم نمره منفی کنکور
+        val percentage = if (questions.isNotEmpty() && answeredCount > 0) {
             val raw = ((correctCount * 3.0 - wrongCount) / (questions.size * 3.0)) * 100.0
             maxOf(0.0, raw)
         } else {
@@ -237,12 +269,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val resultId = database.quizDao().insertQuizResult(resultEntity)
             _latestQuizResult.value = resultEntity.copy(id = resultId)
 
-            // بررسی و اعطای ایمن مدال‌ها
-            checkAndAwardBadges(correctCount, wrongCount, percentage, activeQuizDifficulty)
+            // در صورتی که کاربر هیچ سوالی را پاسخ نداده باشد، هیچ امتیاز یا مدالی تعلق نمی‌گیرد
+            if (answeredCount > 0) {
+                checkAndAwardBadges(correctCount, wrongCount, percentage, activeQuizDifficulty)
 
-            // افزودن امتیاز به حساب کاربر
-            val earnedScore = (correctCount * 10) + if (percentage >= 80.0) 30 else 10
-            database.settingsDao().addScore(earnedScore)
+                // افزودن امتیاز عملکرد واقعی به حساب کاربر
+                val earnedScore = (correctCount * 10) + if (percentage >= 80.0) 30 else 10
+                database.settingsDao().addScore(earnedScore)
+            }
 
             _currentScreen.value = Screen.QuizResult
         }
@@ -254,18 +288,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         percentage: Double,
         difficulty: String
     ) {
+        // ۱. مدال اولین آزمون
+        unlockBadgeWithPoints("FIRST_QUIZ")
+
+        // ۲. مدال درصد ۱۰۰
+        if (percentage >= 99.9) {
+            unlockBadgeWithPoints("PERFECT_SCORE")
+        }
+
+        // ۳. مدال قهرمان کنکور
+        if (difficulty == "کنکوری" && percentage >= 50.0) {
+            unlockBadgeWithPoints("KONKUR_HERO")
+        }
+    }
+
+    /**
+     * باز کردن مدال به صورت اتمیک و دریافت امتیاز مستقیماً از موجودیت مدال (منبع واحد حقیقت)
+     */
+    private suspend fun unlockBadgeWithPoints(badgeKey: String) {
         val badgeDao = database.badgeDao()
-        // مدال اولین آزمون
-        if (badgeDao.safeUnlockBadge("FIRST_QUIZ") > 0) {
-            database.settingsDao().addScore(50)
-        }
-        // مدال درصد ۱۰۰
-        if (percentage >= 99.9 && badgeDao.safeUnlockBadge("PERFECT_SCORE") > 0) {
-            database.settingsDao().addScore(150)
-        }
-        // مدال قهرمان کنکور
-        if (difficulty == "کنکوری" && percentage >= 50.0 && badgeDao.safeUnlockBadge("KONKUR_HERO") > 0) {
-            database.settingsDao().addScore(120)
+        if (badgeDao.safeUnlockBadge(badgeKey) > 0) {
+            val badge = badgeDao.getBadgeByKey(badgeKey)
+            if (badge != null && badge.points > 0) {
+                database.settingsDao().addScore(badge.points)
+            }
         }
     }
 

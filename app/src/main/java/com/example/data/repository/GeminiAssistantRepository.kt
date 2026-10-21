@@ -43,8 +43,11 @@ class GeminiAssistantRepository(
     companion object {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
-        const val MODEL_FLASH = "gemini-3.8-flash"
-        const val MODEL_ARGON = "gemini-4-argon"
+        // شناسه‌های رسمی و معتبر مدل‌های فعال Gemini در ai.google.dev:
+        // ۱. مدل سریع برای پرسش‌های متداول و خلاصه‌سازی
+        const val MODEL_FAST = "gemini-2.5-flash"
+        // ۲. مدل استدلال عمیق با توانایی حل گام‌به‌گام و تحلیلی مسائل ریاضی کنکور
+        const val MODEL_REASONING = "gemini-2.5-pro"
 
         private val SYSTEM_INSTRUCTION = GeminiContent(
             parts = listOf(
@@ -125,7 +128,7 @@ class GeminiAssistantRepository(
         }
 
         // ۴. انتخاب مدل و پیکربندی بر اساس پیچیدگی مسئله
-        val model = if (isComplexMath) MODEL_ARGON else MODEL_FLASH
+        val model = if (isComplexMath) MODEL_REASONING else MODEL_FAST
         val generationConfig = if (isComplexMath) {
             GeminiGenerationConfig(
                 temperature = 0.4f,
@@ -162,6 +165,7 @@ class GeminiAssistantRepository(
                 val userMsg = when (code) {
                     400 -> "صورت مسئله ارسالی نیاز به شفاف‌سازی دارد. لطفاً با جزئیات بیشتر بنویسید."
                     401, 403 -> "خطای احراز هویت در دسترسی به Gemini API. لطفاً از صحت کلید اطمینان یابید."
+                    404 -> "مدل هوش مصنوعی انتخابی ($model) در دسترس نیست یا یافت نشد (کد ۴۰۴). لطفاً مدل دیگری را انتخاب فرمایید."
                     429 -> "سقف مجاز درخواست‌های لحظه‌ای پر شده است. لطفاً چند لحظه بعد تلاش کنید."
                     500, 503 -> "سرویس هوش مصنوعی در حال حاضر با بار کاری بالا مواجه است. لطفاً دقایقی دیگر تلاش فرمایید."
                     else -> "خطایی در دریافت پاسخ از سرویس با کد $code رخ داد."

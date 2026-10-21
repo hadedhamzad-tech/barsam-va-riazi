@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import com.example.BuildConfig
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -171,7 +172,7 @@ fun SettingsScreen(
                             color = Color.Gray
                         )
                         Text(
-                            text = "1.0.0 (${PersianUtils.toPersianDigits("1.0.0")})",
+                            text = PersianUtils.toPersianDigits(BuildConfig.VERSION_NAME),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = JadePrimary

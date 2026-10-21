@@ -113,7 +113,7 @@ fun AnalyticsScreen(
                 )
                 AnalyticsStatCard(
                     title = "میانگین تراز",
-                    value = "%${PersianUtils.toPersianDigits(avgScore ?: 0.0)}",
+                    value = PersianUtils.formatPercentage(avgScore),
                     color = AmberContainer,
                     textColor = AmberPrimary,
                     modifier = Modifier.weight(1f)

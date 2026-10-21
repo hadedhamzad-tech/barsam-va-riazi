@@ -132,7 +132,7 @@ fun DashboardScreen(
                 )
                 SummaryStatBox(
                     title = "میانگین",
-                    value = "%${PersianUtils.toPersianDigits(averageScore ?: 0.0)}",
+                    value = PersianUtils.formatPercentage(averageScore),
                     subtitle = "موفقیت",
                     modifier = Modifier.weight(1f),
                     color = AmberContainer,

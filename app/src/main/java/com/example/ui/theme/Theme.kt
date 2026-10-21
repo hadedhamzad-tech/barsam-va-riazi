@@ -53,18 +53,12 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun BarsamTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Use our signature Jade & Amber palette by default
+    darkTheme: Boolean = false, // قفل روی تم روشن ثابت جهت خوانایی صددرصدی متون مستقل از تنظیم گوشی
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
+    // قفل دائم روی تم روشن جهت جلوگیری از هرگونه ناخوانایی کارت‌ها و متون
+    val colorScheme = LightColorScheme
 
     MaterialTheme(
         colorScheme = colorScheme,

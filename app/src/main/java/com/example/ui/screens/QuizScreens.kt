@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Timer
@@ -42,12 +43,15 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -76,9 +80,23 @@ fun QuizSetupScreen(
     BackHandler { onBack() }
 
     var selectedGrade by remember { mutableStateOf(10) }
+    var selectedTopic by remember { mutableStateOf("همه مباحث") }
     var selectedDifficulty by remember { mutableStateOf("همه سطوح") }
     var selectedCount by remember { mutableStateOf(5) }
     var selectedDuration by remember { mutableStateOf(10) }
+
+    var availableTopics by remember { mutableStateOf<List<String>>(listOf("همه مباحث")) }
+    var showNotEnoughQuestionsDialog by remember { mutableStateOf(false) }
+    var availableCountForDialog by remember { mutableStateOf(0) }
+    var showZeroQuestionsDialog by remember { mutableStateOf(false) }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(selectedGrade) {
+        val topics = viewModel.getTopicsForGrade(selectedGrade)
+        availableTopics = listOf("همه مباحث") + topics
+        selectedTopic = "همه مباحث"
+    }
 
     val difficulties = listOf("همه سطوح", "آسان", "متوسط", "سخت", "کنکوری")
     val questionCounts = listOf(5, 10, 15, 20)
@@ -106,7 +124,7 @@ fun QuizSetupScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "پایه تحصیلی، سطح دشواری و تعداد سوالات مورد نظر خود را انتخاب کنید تا آزمون استاندارد چهارگزینه‌ای شما ساخته شود.",
+                        text = "پایه تحصیلی، مبحث، سطح دشواری و تعداد سوالات را مشخص کنید تا آزمون استاندارد چهارگزینه‌ای شما ساخته شود.",
                         fontSize = 12.sp,
                         color = Color.White.copy(alpha = 0.85f),
                         lineHeight = 18.sp
@@ -115,7 +133,7 @@ fun QuizSetupScreen(
             }
         }
 
-        // انتخاب پایه
+        // ۱. انتخاب پایه
         item {
             Text("۱. پایه تحصیلی:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = JadePrimary)
             Spacer(modifier = Modifier.height(6.dp))
@@ -134,9 +152,28 @@ fun QuizSetupScreen(
             }
         }
 
-        // انتخاب سطح دشواری
+        // ۲. انتخاب مبحث درسی
         item {
-            Text("۲. سطح دشواری سوالات:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = JadePrimary)
+            Text("۲. مبحث درسی:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = JadePrimary)
+            Spacer(modifier = Modifier.height(6.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(availableTopics) { topic ->
+                    FilterChip(
+                        selected = selectedTopic == topic,
+                        onClick = { selectedTopic = topic },
+                        label = { Text(topic) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = JadeSecondary,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+            }
+        }
+
+        // ۳. انتخاب سطح دشواری
+        item {
+            Text("۳. سطح دشواری سوالات:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = JadePrimary)
             Spacer(modifier = Modifier.height(6.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(difficulties) { diff ->
@@ -153,9 +190,9 @@ fun QuizSetupScreen(
             }
         }
 
-        // تعداد سوالات
+        // ۴. تعداد سوالات
         item {
-            Text("۳. تعداد سوالات آزمون:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = JadePrimary)
+            Text("۴. تعداد سوالات آزمون:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = JadePrimary)
             Spacer(modifier = Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 questionCounts.forEach { count ->
@@ -172,9 +209,9 @@ fun QuizSetupScreen(
             }
         }
 
-        // مدت زمان آزمون
+        // ۵. مدت زمان آزمون
         item {
-            Text("۴. زمان پاسخ‌گویی:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = JadePrimary)
+            Text("۵. زمان پاسخ‌گویی:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = JadePrimary)
             Spacer(modifier = Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 durations.forEach { dur ->
@@ -196,13 +233,27 @@ fun QuizSetupScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = {
-                    viewModel.startCustomQuiz(
-                        grade = selectedGrade,
-                        topic = null,
-                        difficulty = selectedDifficulty,
-                        count = selectedCount,
-                        durationMinutes = selectedDuration
-                    )
+                    coroutineScope.launch {
+                        val availableCount = viewModel.getAvailableQuizQuestionCount(
+                            grade = selectedGrade,
+                            topic = selectedTopic,
+                            difficulty = selectedDifficulty
+                        )
+                        if (availableCount == 0) {
+                            showZeroQuestionsDialog = true
+                        } else if (availableCount < selectedCount) {
+                            availableCountForDialog = availableCount
+                            showNotEnoughQuestionsDialog = true
+                        } else {
+                            viewModel.startCustomQuiz(
+                                grade = selectedGrade,
+                                topic = selectedTopic,
+                                difficulty = selectedDifficulty,
+                                count = selectedCount,
+                                durationMinutes = selectedDuration
+                            )
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(12.dp),
@@ -218,6 +269,51 @@ fun QuizSetupScreen(
                 )
             }
         }
+    }
+
+    if (showZeroQuestionsDialog) {
+        AlertDialog(
+            onDismissRequest = { showZeroQuestionsDialog = false },
+            title = { Text("عدم وجود سؤال با مشخصات انتخابی", fontWeight = FontWeight.Bold) },
+            text = { Text("هیچ سؤالی با فیلترهای انتخابی در بانک سوالات یافت نشد. لطفاً مبحث یا سطح دشواری دیگری را انتخاب کنید.") },
+            confirmButton = {
+                TextButton(onClick = { showZeroQuestionsDialog = false }) {
+                    Text("تغییر فیلترها", color = JadePrimary, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    if (showNotEnoughQuestionsDialog) {
+        AlertDialog(
+            onDismissRequest = { showNotEnoughQuestionsDialog = false },
+            title = { Text("محدودیت تعداد سؤالات", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("فقط ${PersianUtils.toPersianDigits(availableCountForDialog)} سوال با فیلترهای انتخابی در بانک موجود است. آیا مایلید آزمون با همین تعداد آغاز شود یا مایل به تغییر فیلترها هستید؟")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showNotEnoughQuestionsDialog = false
+                        viewModel.startCustomQuiz(
+                            grade = selectedGrade,
+                            topic = selectedTopic,
+                            difficulty = selectedDifficulty,
+                            count = availableCountForDialog,
+                            durationMinutes = selectedDuration
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = JadePrimary)
+                ) {
+                    Text("شروع با ${PersianUtils.toPersianDigits(availableCountForDialog)} سوال", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNotEnoughQuestionsDialog = false }) {
+                    Text("تغییر فیلترها")
+                }
+            }
+        )
     }
 }
 
@@ -356,6 +452,17 @@ fun QuizActiveScreen(
             }
         }
 
+        if (selectedOption != null) {
+            TextButton(
+                onClick = { viewModel.clearQuizAnswer(currentIndex) },
+                modifier = Modifier.align(Alignment.CenterHorizontally).padding(vertical = 2.dp)
+            ) {
+                Icon(Icons.Default.Clear, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("پاک کردن پاسخ (بدون پاسخ)", color = ErrorRed, fontSize = 12.sp)
+            }
+        }
+
         // دکمه‌های ناوبری قبلی / بعدی / اتمام
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -399,6 +506,7 @@ fun QuizActiveScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showCancelDialog = false
+                    viewModel.cancelActiveQuiz()
                     onCancel()
                 }) {
                     Text("بله، خروج", color = ErrorRed)
@@ -550,14 +658,14 @@ fun QuizResultScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "%${PersianUtils.toPersianDigits(res.percentage)}",
+                        text = PersianUtils.formatPercentage(res.percentage),
                         fontSize = 36.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "پایه ${PersianUtils.toPersianDigits(res.grade)} • سطح: ${res.difficulty} • مدت: ${PersianUtils.formatDuration(res.durationSeconds)}",
+                        text = "پایه ${PersianUtils.toPersianDigits(res.grade)} • مبحث: ${res.topic} • سطح: ${res.difficulty} • مدت: ${PersianUtils.formatDuration(res.durationSeconds)}",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.85f)
                     )

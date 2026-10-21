@@ -151,7 +151,7 @@ class BarsamPhase3Test {
         assertTrue("نتیجه درخواست باید حتماً Success باشد", result is AiAssistantResult.Success)
         val success = result as AiAssistantResult.Success
         assertEquals("مشتق تابع برابر با 2x است.", success.reply)
-        assertEquals("gemini-4-argon", success.modelUsed)
+        assertEquals(GeminiAssistantRepository.MODEL_REASONING, success.modelUsed)
         assertEquals("سرویس باید دقیقاً یک بار فراخوانی شده باشد", 1, mockApi.callCount)
         assertEquals("کلید احراز هویت باید به‌درستی به متد ارسال شده باشد", "valid-test-key-789", mockApi.lastApiKeyReceived)
     }

@@ -28,6 +28,14 @@ interface QuestionDao {
     """)
     suspend fun getQuizQuestions(grade: Int, topic: String?, difficulty: String?, limit: Int): List<MathQuestionEntity>
 
+    @Query("""
+        SELECT COUNT(*) FROM math_questions 
+        WHERE grade = :grade 
+        AND (:topic IS NULL OR topic = :topic)
+        AND (:difficulty IS NULL OR difficulty = :difficulty)
+    """)
+    suspend fun getQuizQuestionsCount(grade: Int, topic: String?, difficulty: String?): Int
+
     @Query("SELECT DISTINCT topic FROM math_questions WHERE grade = :grade ORDER BY topic ASC")
     suspend fun getTopicsByGrade(grade: Int): List<String>
 
