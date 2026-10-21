@@ -1,0 +1,6 @@
+{
+  "name": "برسام و ریاضی",
+  "description": "دستیار هوشمند و جامع یادگیری، برنامه‌ریزی، تمرین، آزمون، دفترچه اشتباهات و تحلیل عملکرد ریاضی کنکور برای پایه‌های دهم، یازدهم و دوازدهم",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
