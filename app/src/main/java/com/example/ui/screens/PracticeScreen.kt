@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import com.example.ui.components.MathText
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -216,7 +217,7 @@ fun FormulaCard(item: FormulaCardItem) {
                 color = JadePrimary
             )
             Spacer(modifier = Modifier.height(6.dp))
-            Text(
+            MathText(
                 text = item.formulaSummary,
                 fontSize = 12.sp,
                 color = Color.DarkGray,
@@ -228,7 +229,7 @@ fun FormulaCard(item: FormulaCardItem) {
                 colors = CardDefaults.cardColors(containerColor = AmberContainer),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text(
+                MathText(
                     text = "💡 نکته کنکوری: ${item.testTips}",
                     fontSize = 11.sp,
                     color = OnAmberContainer,
@@ -269,7 +270,7 @@ fun PracticeQuestionCard(question: MathQuestionEntity) {
                 )
             }
             Spacer(modifier = Modifier.height(6.dp))
-            Text(
+            MathText(
                 text = question.questionText,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
@@ -279,7 +280,7 @@ fun PracticeQuestionCard(question: MathQuestionEntity) {
 
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(top = 10.dp)) {
-                    Text(
+                    MathText(
                         text = "۱) ${question.option1}   ۲) ${question.option2}\n۳) ${question.option3}   ۴) ${question.option4}",
                         fontSize = 12.sp,
                         color = Color.DarkGray,
@@ -298,7 +299,7 @@ fun PracticeQuestionCard(question: MathQuestionEntity) {
                                 color = Color(0xFF2E7D32)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(
+                            MathText(
                                 text = "پاسخ تشریحی: ${question.explanation}",
                                 fontSize = 11.sp,
                                 color = Color(0xFF1B5E20),

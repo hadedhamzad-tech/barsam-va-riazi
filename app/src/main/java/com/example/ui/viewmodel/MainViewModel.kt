@@ -220,6 +220,12 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
+    fun goToQuestion(index: Int) {
+        if (index in _activeQuestions.value.indices) {
+            _currentQuestionIndex.value = index
+        }
+    }
+
     fun finishActiveQuiz() {
         if (isQuizFinishing) return
         isQuizFinishing = true
@@ -245,8 +251,22 @@ class MainViewModel @JvmOverloads constructor(
         val spentSeconds = totalQuizSeconds - _remainingSeconds.value
         val answeredCount = correctCount + wrongCount
 
+        // در صورتی که کاربر به هیچ سوالی پاسخ نداده باشد (آزمون کاملاً سفید):
+        // نتیجه‌ای در دیتابیس ذخیره نمی‌شود تا میانگین درصدها و آمار تخریب نشود.
+        // وضعیت آزمون فعال پاک شده و کاربر به صفحه داشبورد بازمی‌گردد.
+        if (answeredCount == 0) {
+            isQuizFinishing = false
+            _activeQuestions.value = emptyList()
+            _userAnswers.value = emptyMap()
+            _remainingSeconds.value = 0
+            _currentQuestionIndex.value = 0
+            _latestQuizResult.value = null
+            _currentScreen.value = Screen.Dashboard
+            return
+        }
+
         // محاسبه استاندارد درصد با احتساب یک‌سوم نمره منفی کنکور
-        val percentage = if (questions.isNotEmpty() && answeredCount > 0) {
+        val percentage = if (questions.isNotEmpty()) {
             val raw = ((correctCount * 3.0 - wrongCount) / (questions.size * 3.0)) * 100.0
             maxOf(0.0, raw)
         } else {
@@ -269,14 +289,11 @@ class MainViewModel @JvmOverloads constructor(
             val resultId = database.quizDao().insertQuizResult(resultEntity)
             _latestQuizResult.value = resultEntity.copy(id = resultId)
 
-            // در صورتی که کاربر هیچ سوالی را پاسخ نداده باشد، هیچ امتیاز یا مدالی تعلق نمی‌گیرد
-            if (answeredCount > 0) {
-                checkAndAwardBadges(correctCount, wrongCount, percentage, activeQuizDifficulty)
+            checkAndAwardBadges(correctCount, wrongCount, percentage, activeQuizDifficulty)
 
-                // افزودن امتیاز عملکرد واقعی به حساب کاربر
-                val earnedScore = (correctCount * 10) + if (percentage >= 80.0) 30 else 10
-                database.settingsDao().addScore(earnedScore)
-            }
+            // افزودن امتیاز عملکرد واقعی به حساب کاربر
+            val earnedScore = (correctCount * 10) + if (percentage >= 80.0) 30 else 10
+            database.settingsDao().addScore(earnedScore)
 
             _currentScreen.value = Screen.QuizResult
         }

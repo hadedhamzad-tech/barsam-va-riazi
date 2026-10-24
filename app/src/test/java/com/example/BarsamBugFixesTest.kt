@@ -189,19 +189,15 @@ class BarsamBugFixesTest {
         assertEquals("امتیاز نباید دوبار اضافه شود", 50, finalScore)
     }
 
-    // تست ۴: آزمون خالی نباید هیچ امتیازی یا مدالی بدهد و از اجرای دوبار جلوگیری شود
+    // تست ۴: آزمون خالی با صفر پاسخ نباید در دیتابیس ثبت شود و کاربر به داشبورد هدایت می‌شود
     @Test
-    fun `test empty quiz with zero answers awards zero score and no badges, and prevents double finish`() = runBlocking {
+    fun `test empty quiz with zero answers does not save to database and returns to dashboard`() = runBlocking {
         val viewModel = MainViewModel(app, database)
 
         viewModel.startCustomQuiz(grade = 10, topic = "همه مباحث", difficulty = "آسان", count = 5, durationMinutes = 10)
         org.robolectric.shadows.ShadowLooper.runUiThreadTasks()
 
         // بدون ثبت هیچ پاسخی، آزمون به پایان می‌رسد
-        viewModel.finishActiveQuiz()
-        org.robolectric.shadows.ShadowLooper.runUiThreadTasks()
-
-        // فراخوانی مجدد بلافاصله برای تست جلوگیری از ذخیره دوبل
         viewModel.finishActiveQuiz()
         org.robolectric.shadows.ShadowLooper.runUiThreadTasks()
 
@@ -212,7 +208,8 @@ class BarsamBugFixesTest {
         assertFalse("برای آزمون سفید، مدال اولین آزمون نباید باز شود", firstQuizBadge?.isUnlocked ?: false)
 
         val quizCount = database.quizDao().getQuizCount().first()
-        assertEquals("تنها یک رکورد کارنامه باید ثبت شده باشد و فراخوانی دوم مسدود شده باشد", 1, quizCount)
+        assertEquals("برای آزمون کاملاً سفید نباید رکوردی در دیتابیس ثبت شود تا میانگین خراب نشود", 0, quizCount)
+        assertEquals("کاربر باید به صفحه اصلی هدایت شده باشد", Screen.Dashboard, viewModel.currentScreen.value)
     }
 
     // تست ۵: انتخاب مبحث و اعتبارسنجی تعداد سوالات بدون فیلتر شل یا fallback پنهان
@@ -239,27 +236,62 @@ class BarsamBugFixesTest {
     // تست ۶: فرمت اعداد و درصدها با ممیز فارسی و علامت ٪ در انتها
     @Test
     fun `test formatPercentage rounds to 1 decimal place with Persian comma and percent sign at end`() {
-        // ۷۳.۳۳۳۳۳۳۳ -> ۷۳٫۳٪
         assertEquals("۷۳٫۳٪", PersianUtils.formatPercentage(73.333333))
-
-        // ۱۰۰.۰ -> ۱۰۰٫۰٪
         assertEquals("۱۰۰٫۰٪", PersianUtils.formatPercentage(100.0))
-
-        // ۰.۰ -> ۰٫۰٪
         assertEquals("۰٫۰٪", PersianUtils.formatPercentage(0.0))
-
-        // null -> ۰٫۰٪
         assertEquals("۰٫۰٪", PersianUtils.formatPercentage(null))
-
-        // ۶۶.۶۶۶۶ -> ۶۶٫۷٪
         assertEquals("۶۶٫۷٪", PersianUtils.formatPercentage(66.6666))
     }
 
-    // تست ۸: شناسه‌های مدل‌های Gemini و پیام خطای ۴۰۴
+    // تست ۷: تفکیک دقیق متن‌های ریاضی و ایزولاسیون با LRI/PDI (مشکل ۱)
     @Test
-    fun `test Gemini model constants and 404 error message clarity`() = runBlocking {
-        assertEquals("gemini-2.5-flash", GeminiAssistantRepository.MODEL_FAST)
-        assertEquals("gemini-2.5-pro", GeminiAssistantRepository.MODEL_REASONING)
+    fun `test formatMathText isolates math expressions with Unicode LRI and PDI`() {
+        val lri = PersianUtils.LRI
+        val pdi = PersianUtils.PDI
+
+        // ۱. بازه‌های عددی
+        assertEquals("${lri}(-2, 2)${pdi}", PersianUtils.formatMathText("(-2, 2)"))
+        assertEquals("${lri}[-2, 2]${pdi}", PersianUtils.formatMathText("[-2, 2]"))
+        assertEquals("${lri}(-∞, 2)${pdi}", PersianUtils.formatMathText("(-∞, 2)"))
+
+        // ۲. رادیکال و ضرایب
+        assertEquals("${lri}2√5${pdi}", PersianUtils.formatMathText("2√5"))
+
+        // ۳. مثلثات و توان
+        assertEquals("${lri}1 - 2sin²(x)${pdi}", PersianUtils.formatMathText("1 - 2sin²(x)"))
+
+        // ۴. حد و کسر جبری
+        assertEquals("${lri}lim(x→3) (x² - 9)/(x - 3)${pdi}", PersianUtils.formatMathText("lim(x→3) (x² - 9)/(x - 3)"))
+
+        // ۵. لگاریتم و زیرنویس
+        assertEquals("${lri}log₂(4 - x²)${pdi}", PersianUtils.formatMathText("log₂(4 - x²)"))
+
+        // ۶. کسرهای شامل پی
+        assertEquals("${lri}3π/2${pdi}", PersianUtils.formatMathText("3π/2"))
+
+        // ۷. نقاط مختصاتی ترکیب با واو فارسی
+        assertEquals("${lri}A(1, 2)${pdi} و ${lri}B(4, 6)${pdi}", PersianUtils.formatMathText("A(1, 2) و B(4, 6)"))
+
+        // ۸. متن مختلط فارسی و فرمول ریاضی
+        val mixedText = "فاصله نقطه A(1, 2) تا خط برابر √5 است."
+        val expectedMixed = "فاصله نقطه ${lri}A(1, 2)${pdi} تا خط برابر ${lri}√5${pdi} است."
+        assertEquals(expectedMixed, PersianUtils.formatMathText(mixedText))
+
+        // ۹. ایدمپوتنت بودن (عدم بسته‌بندی مجدد در صورت فراخوانی دوباره)
+        val once = PersianUtils.formatMathText("(-2, 2)")
+        val twice = PersianUtils.formatMathText(once)
+        assertEquals(once, twice)
+    }
+
+    // تست ۸: شناسه‌های مدل‌های Gemini و مکانیزم پشتیبان Fallback در خطای ۴۰۴ (مشکل ۲)
+    @Test
+    fun `test Gemini model constants and fallback retry on 404`() = runBlocking {
+        assertEquals("gemini-3.8-flash", GeminiAssistantRepository.MODEL_FAST)
+        assertEquals("gemini-3.8-flash", GeminiAssistantRepository.MODEL_REASONING)
+
+        var generateCallCount = 0
+        var modelUsedInGenerate = ""
+        var listModelsCalled = false
 
         val mockApi = object : GeminiApiService {
             override suspend fun generateContent(
@@ -267,9 +299,47 @@ class BarsamBugFixesTest {
                 apiKey: String,
                 request: GeminiRequest
             ): Response<GeminiResponse> {
-                return Response.error(
-                    404,
-                    "{\"error\":\"Model not found\"}".toResponseBody("application/json".toMediaTypeOrNull())
+                generateCallCount++
+                modelUsedInGenerate = model
+                return if (model == "gemini-3.8-flash") {
+                    // شبیه‌سازی خطای ۴۰۴ برای مدل پیش‌فرض
+                    Response.error(
+                        404,
+                        "{\"error\":\"models/gemini-3.8-flash not found\"}".toResponseBody("application/json".toMediaTypeOrNull())
+                    )
+                } else if (model == "gemini-2.5-flash") {
+                    // پاسخ موفق برای مدل fallback
+                    Response.success(
+                        GeminiResponse(
+                            candidates = listOf(
+                                com.example.data.remote.GeminiCandidate(
+                                    content = com.example.data.remote.GeminiContent(
+                                        parts = listOf(com.example.data.remote.GeminiPart("پاسخ مدل جایگزین"))
+                                    )
+                                )
+                            )
+                        )
+                    )
+                } else {
+                    Response.error(400, "{}".toResponseBody("application/json".toMediaTypeOrNull()))
+                }
+            }
+
+            override suspend fun listModels(apiKey: String): Response<com.example.data.remote.GeminiModelListResponse> {
+                listModelsCalled = true
+                return Response.success(
+                    com.example.data.remote.GeminiModelListResponse(
+                        models = listOf(
+                            com.example.data.remote.GeminiModelInfo(
+                                name = "models/gemini-1.5-flash",
+                                supportedGenerationMethods = listOf("generateContent")
+                            ),
+                            com.example.data.remote.GeminiModelInfo(
+                                name = "models/gemini-2.5-flash",
+                                supportedGenerationMethods = listOf("generateContent")
+                            )
+                        )
+                    )
                 )
             }
         }
@@ -286,9 +356,12 @@ class BarsamBugFixesTest {
         )
 
         val result = repo.askMathAssistant("سوال تستی")
-        assertTrue(result is AiAssistantResult.Error)
-        val error = result as AiAssistantResult.Error
-        assertTrue("پیام باید شامل کد ۴۰۴ یا عبارت در دسترس نیست باشد", error.userMessage.contains("۴۰۴") || error.userMessage.contains("یافت نشد"))
+        assertTrue("لیست مدل‌ها باید در مواجهه با ۴۰۴ فراخوانی شده باشد", listModelsCalled)
+        assertEquals("درخواست باید دوبار ارسال شده باشد (بار اول مدل پیش‌فرض، بار دوم مدل جایگزین)", 2, generateCallCount)
+        assertEquals("مدل استفاده‌شده در درخواست دوم باید gemini-2.5-flash باشد", "gemini-2.5-flash", modelUsedInGenerate)
+        assertTrue("نتیجه نهایی پس از پشتیبان باید موفقیت‌آمیز باشد", result is AiAssistantResult.Success)
+        val success = result as AiAssistantResult.Success
+        assertEquals("نام مدل جایگزین باید در خروجی ثبت شده باشد", "gemini-2.5-flash", success.modelUsed)
     }
 
     @Test

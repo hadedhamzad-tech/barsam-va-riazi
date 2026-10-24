@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import com.example.ui.components.MathText
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -390,6 +391,48 @@ fun QuizActiveScreen(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
+
+        // ردیف قابل‌اسکرول شماره سوال‌ها با نمایش وضعیت (جاری، پاسخ‌داده‌شده، نزده)
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            itemsIndexed(questions) { qIdx, _ ->
+                val isCurrent = qIdx == currentIndex
+                val isAnswered = answers.containsKey(qIdx)
+                val bgColor = when {
+                    isAnswered -> SuccessGreen
+                    else -> Color(0xFFE0E0E0)
+                }
+                val textColor = when {
+                    isAnswered -> Color.White
+                    else -> Color.DarkGray
+                }
+                val borderColor = if (isCurrent) JadePrimary else Color.Transparent
+                val borderWidth = if (isCurrent) 2.5.dp else 0.dp
+
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(bgColor, CircleShape)
+                        .border(borderWidth, borderColor, CircleShape)
+                        .clickable { viewModel.goToQuestion(qIdx) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = PersianUtils.toPersianDigits(qIdx + 1),
+                        color = textColor,
+                        fontSize = 12.sp,
+                        fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
         LinearProgressIndicator(
             progress = { (currentIndex + 1).toFloat() / questions.size },
             modifier = Modifier.fillMaxWidth().height(6.dp),
@@ -399,7 +442,7 @@ fun QuizActiveScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // متن سوال
+        // متن سوال با MathText جهت ایزولاسیون فرمول‌ها
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -424,7 +467,7 @@ fun QuizActiveScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
-                Text(
+                MathText(
                     text = currentQ.questionText,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -521,10 +564,23 @@ fun QuizActiveScreen(
     }
 
     if (showFinishDialog) {
+        val unansweredCount = questions.size - answers.size
         AlertDialog(
             onDismissRequest = { showFinishDialog = false },
-            title = { Text("تأیید پایان آزمون") },
-            text = { Text("آیا آماده‌اید کارنامه و درصد پاسخ‌های خود را مشاهده کنید؟") },
+            title = { Text("تأیید پایان آزمون", fontWeight = FontWeight.Bold) },
+            text = {
+                if (unansweredCount > 0) {
+                    Text(
+                        text = "تعداد ${PersianUtils.toPersianDigits(unansweredCount)} سوال را پاسخ نداده‌اید.\nآیا مایل به پایان آزمون هستید؟",
+                        lineHeight = 22.sp
+                    )
+                } else {
+                    Text(
+                        text = "به تمام ${PersianUtils.toPersianDigits(questions.size)} سوال پاسخ داده‌اید.\nآیا مایل به پایان آزمون و مشاهده کارنامه هستید؟",
+                        lineHeight = 22.sp
+                    )
+                }
+            },
             confirmButton = {
                 Button(
                     onClick = {
@@ -533,12 +589,12 @@ fun QuizActiveScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = JadePrimary)
                 ) {
-                    Text("مشاهده کارنامه", color = Color.White)
+                    Text("پایان آزمون", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showFinishDialog = false }) {
-                    Text("بازگشت و بازبینی")
+                    Text("بازگشت و بازبینی", color = JadePrimary)
                 }
             }
         )
@@ -587,7 +643,7 @@ fun OptionCard(
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Text(
+            MathText(
                 text = text,
                 fontSize = 13.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
@@ -755,7 +811,7 @@ fun QuizResultScreen(
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = q.questionText, fontSize = 13.sp, lineHeight = 19.sp)
+                    MathText(text = q.questionText, fontSize = 13.sp, lineHeight = 19.sp)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
@@ -774,7 +830,7 @@ fun QuizResultScreen(
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(
+                    MathText(
                         text = "پاسخ تشریحی: ${q.explanation}",
                         fontSize = 11.sp,
                         color = Color.DarkGray,

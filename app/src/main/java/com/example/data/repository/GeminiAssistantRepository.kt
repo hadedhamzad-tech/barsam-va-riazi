@@ -43,11 +43,10 @@ class GeminiAssistantRepository(
     companion object {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
-        // شناسه‌های رسمی و معتبر مدل‌های فعال Gemini در ai.google.dev:
-        // ۱. مدل سریع برای پرسش‌های متداول و خلاصه‌سازی
-        const val MODEL_FAST = "gemini-2.5-flash"
-        // ۲. مدل استدلال عمیق با توانایی حل گام‌به‌گام و تحلیلی مسائل ریاضی کنکور
-        const val MODEL_REASONING = "gemini-2.5-pro"
+        // شناسه‌های رسمی و متمرکز مدل‌های فعال Gemini:
+        // هر دو حالت به صورت پیش‌فرض از gemini-3.8-flash با سطوح تفکر متفاوت استفاده می‌کنند
+        const val MODEL_FAST = "gemini-3.8-flash"
+        const val MODEL_REASONING = "gemini-3.8-flash"
 
         private val SYSTEM_INSTRUCTION = GeminiContent(
             parts = listOf(
@@ -55,7 +54,8 @@ class GeminiAssistantRepository(
                     "تو «دستیار برسام» هستی، دستیار هوشمند و دلسوز آموزشی درس ریاضی برای دانش‌آموزان پایه‌های دهم، یازدهم و دوازدهم در برنامه «برسام و ریاضی». " +
                             "وظیفه تو راهنمایی گام‌به‌گام در حل مسائل، آموزش مفهومی فرمول‌ها، و تفکیک مراحل محاسباتی است. " +
                             "پاسخ‌ها را به زبان فارسی، روان، دقیق و ساختاریافته ارائه بده. ابتدا ایده اصلی حل را بگو و سپس گام‌های تفصیلی را توضیح بده. " +
-                            "اگر صورت مسئله ناقص است، ابتدا سوال روشن‌کننده بپرس. تا حد امکان از اعداد فارسی استفاده کن."
+                            "از Markdown و LaTeX استفاده نکن؛ فرمول‌ها را با نمادهای ساده مثل √ ، ² ، π ، ∞ و متن معمولی بنویس. " +
+                            "اگر صورت مسئله ناقص است، ابتدا سوال روشن‌کننده بپرس. تا حد امکان از اعداد فارسی برای متن‌های عادی استفاده کن، ولی در فرمول‌ها ارقام لاتین بمانند."
                 )
             )
         )
@@ -128,14 +128,17 @@ class GeminiAssistantRepository(
         }
 
         // ۴. انتخاب مدل و پیکربندی بر اساس پیچیدگی مسئله
-        val model = if (isComplexMath) MODEL_REASONING else MODEL_FAST
+        val initialModel = if (isComplexMath) MODEL_REASONING else MODEL_FAST
         val generationConfig = if (isComplexMath) {
             GeminiGenerationConfig(
                 temperature = 0.4f,
-                thinkingConfig = GeminiThinkingConfig(thinkingLevel = "HIGH")
+                thinkingConfig = GeminiThinkingConfig(thinkingLevel = "high")
             )
         } else {
-            GeminiGenerationConfig(temperature = 0.7f)
+            GeminiGenerationConfig(
+                temperature = 0.7f,
+                thinkingConfig = GeminiThinkingConfig(thinkingLevel = "low")
+            )
         }
 
         val request = GeminiRequest(
@@ -148,29 +151,61 @@ class GeminiAssistantRepository(
             generationConfig = generationConfig
         )
 
-        // ۵. فراخوانی امن و مدیریت جامع خطاها
+        // ۵. فراخوانی امن با مکانیزم Fallback در صورت بروز خطای ۴۰۴ یا ۴۰۳
         try {
-            // کلید به عنوان هدر x-goog-api-key ارسال می‌شود
-            val response = apiService.generateContent(model, apiKey, request)
+            var actualModel = initialModel
+            var response = apiService.generateContent(initialModel, apiKey, request)
+
+            // در صورت ۴۰۴ یا ۴۰۳، تلاش برای یافتن جدیدترین مدل فعال خانواده flash از models.list
+            if (!response.isSuccessful && (response.code() == 404 || response.code() == 403)) {
+                try {
+                    val listResponse = apiService.listModels(apiKey)
+                    if (listResponse.isSuccessful) {
+                        val availableModels = listResponse.body()?.models ?: emptyList()
+                        val validCandidates = availableModels.filter {
+                            it.supportedGenerationMethods?.contains("generateContent") == true
+                        }
+
+                        // انتخاب جدیدترین مدل خانواده flash
+                        val fallback = validCandidates
+                            .filter { it.name.contains("flash", ignoreCase = true) }
+                            .maxByOrNull { it.name }
+                            ?: validCandidates.maxByOrNull { it.name }
+
+                        if (fallback != null) {
+                            val newModel = fallback.name.removePrefix("models/")
+                            if (newModel != initialModel) {
+                                actualModel = newModel
+                                response = apiService.generateContent(newModel, apiKey, request)
+                            }
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (ignored: Exception) {
+                    // در صورت خطای دریافت لیست مدل‌ها، پاسخ خطای اصلی ارزیابی می‌شود
+                }
+            }
+
             if (response.isSuccessful) {
                 val body = response.body()
                 val replyText = body?.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 if (!replyText.isNullOrBlank()) {
-                    AiAssistantResult.Success(replyText.trim(), model)
+                    AiAssistantResult.Success(replyText.trim(), actualModel)
                 } else {
                     AiAssistantResult.Error("پاسخی از دستیار دریافت نشد. لطفاً پرسش خود را دوباره بیان کنید.")
                 }
             } else {
                 val code = response.code()
                 val userMsg = when (code) {
-                    400 -> "صورت مسئله ارسالی نیاز به شفاف‌سازی دارد. لطفاً با جزئیات بیشتر بنویسید."
-                    401, 403 -> "خطای احراز هویت در دسترسی به Gemini API. لطفاً از صحت کلید اطمینان یابید."
-                    404 -> "مدل هوش مصنوعی انتخابی ($model) در دسترس نیست یا یافت نشد (کد ۴۰۴). لطفاً مدل دیگری را انتخاب فرمایید."
-                    429 -> "سقف مجاز درخواست‌های لحظه‌ای پر شده است. لطفاً چند لحظه بعد تلاش کنید."
-                    500, 503 -> "سرویس هوش مصنوعی در حال حاضر با بار کاری بالا مواجه است. لطفاً دقایقی دیگر تلاش فرمایید."
-                    else -> "خطایی در دریافت پاسخ از سرویس با کد $code رخ داد."
+                    400 -> "صورت مسئله ارسالی نیاز به شفاف‌سازی دارد (کد ۴۰۰ - $actualModel)."
+                    401, 403 -> "خطای احراز هویت در دسترسی به Gemini API با کد $code در مدل $actualModel. لطفاً کلید API را بررسی فرمایید."
+                    404 -> "مدل هوش مصنوعی انتخابی ($actualModel) در دسترس نیست یا یافت نشد (کد ۴۰۴)."
+                    429 -> "سقف مجاز درخواست‌های لحظه‌ای پر شده است (کد ۴۲۹ - $actualModel). لطفاً چند لحظه بعد تلاش کنید."
+                    500, 503 -> "سرویس هوش مصنوعی در حال حاضر با بار کاری بالا مواجه است (کد $code - $actualModel). لطفاً دقایقی دیگر تلاش فرمایید."
+                    else -> "خطایی در دریافت پاسخ از سرویس با کد $code در مدل $actualModel رخ داد."
                 }
-                AiAssistantResult.Error(userMsg, "HTTP $code")
+                AiAssistantResult.Error(userMsg, "HTTP $code - $actualModel")
             }
         } catch (e: CancellationException) {
             // حفظ ساختار لغو کوروتین و پرتاب مجدد استثنا

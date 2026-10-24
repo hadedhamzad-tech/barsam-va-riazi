@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import com.example.ui.components.MathText
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -282,7 +283,7 @@ fun ChatBubble(message: MainViewModel.ChatMessage) {
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                 }
-                Text(
+                MathText(
                     text = message.text,
                     fontSize = 13.sp,
                     color = if (isUser) Color.White else Color.Black,

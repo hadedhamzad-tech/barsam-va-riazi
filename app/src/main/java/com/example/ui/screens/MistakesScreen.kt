@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import com.example.ui.components.MathText
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -206,7 +207,7 @@ fun MistakeCard(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
+            MathText(
                 text = mistake.questionText,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
@@ -215,13 +216,13 @@ fun MistakeCard(
 
             Spacer(modifier = Modifier.height(8.dp))
             Row {
-                Text(
+                MathText(
                     text = "گزینه غلط شما: ${mistake.userChosenOption}",
                     fontSize = 11.sp,
                     color = ErrorRed
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(
+                MathText(
                     text = "پاسخ صحیح: ${mistake.correctOption}",
                     fontSize = 11.sp,
                     color = SuccessGreen,
@@ -240,7 +241,7 @@ fun MistakeCard(
             }
 
             Spacer(modifier = Modifier.height(6.dp))
-            Text(
+            MathText(
                 text = "پاسخ تشریحی: ${mistake.explanation}",
                 fontSize = 10.sp,
                 color = Color.DarkGray,

@@ -56,12 +56,14 @@ fun AnalyticsScreen(
     val totalWrong = results.sumOf { it.wrongCount }
     val percentages = results.map { it.percentage }.reversed() // ترتیب از قدیمی به جدید برای نمودار
 
-    // تحلیل مباحث قوی و نیازمند تمرین بر اساس داده‌های واقعی
-    val topicScores = results.groupBy { it.topic }
+    // تحلیل مباحث قوی و نیازمند تمرین بر اساس داده‌های واقعی (مستثنی کردن آزمون‌های جامع و همه مباحث)
+    val specificTopicResults = results.filter { it.topic != "همه مباحث" && it.topic != "جامع" }
+    val topicScores = specificTopicResults.groupBy { it.topic }
         .mapValues { entry -> entry.value.map { it.percentage }.average() }
 
     val strongTopics = topicScores.filter { it.value >= 60.0 }.keys.take(3)
     val weakTopics = topicScores.filter { it.value < 60.0 }.keys.take(3)
+    val onlyGeneralQuizzes = results.isNotEmpty() && specificTopicResults.isEmpty()
 
     LazyColumn(
         modifier = Modifier
@@ -180,6 +182,8 @@ fun AnalyticsScreen(
                             strongTopics.forEach { topic ->
                                 Text("• $topic", fontSize = 11.sp, color = Color.DarkGray, modifier = Modifier.padding(vertical = 2.dp))
                             }
+                        } else if (onlyGeneralQuizzes) {
+                            Text("برای تحلیل مباحث، آزمون تک‌مبحثی بدهید", fontSize = 10.sp, color = AmberPrimary, lineHeight = 15.sp)
                         } else {
                             Text("پس از چند آزمون مشخص می‌شود", fontSize = 10.sp, color = Color.Gray)
                         }
@@ -204,6 +208,8 @@ fun AnalyticsScreen(
                             weakTopics.forEach { topic ->
                                 Text("• $topic", fontSize = 11.sp, color = Color.DarkGray, modifier = Modifier.padding(vertical = 2.dp))
                             }
+                        } else if (onlyGeneralQuizzes) {
+                            Text("برای تحلیل مباحث، آزمون تک‌مبحثی بدهید", fontSize = 10.sp, color = AmberPrimary, lineHeight = 15.sp)
                         } else if (mistakes.isNotEmpty()) {
                             val mistakeTopics = mistakes.map { it.topic }.distinct().take(3)
                             mistakeTopics.forEach { topic ->

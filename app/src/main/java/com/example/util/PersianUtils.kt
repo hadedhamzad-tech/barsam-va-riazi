@@ -72,4 +72,89 @@ object PersianUtils {
             )
         }
     }
+
+    // ==========================================
+    // تفکیک و ایزولاسیون متن‌های ریاضی در محیط RTL (Unicode Isolate LRI/PDI)
+    // ==========================================
+    const val LRI = '\u2066' // Left-to-Right Isolate
+    const val PDI = '\u2069' // Pop Directional Isolate
+
+    private const val MATH_SYMBOLS = "+-−*·×/÷=≠<>≤≥^√π∞→|±∓²³⁴ⁿ⁻⁺⁰¹₂₃₄°~Δαβθλμσω"
+    private const val MATH_CLOSING_DELIMITERS = ")]}|'\""
+
+    fun isPersian(c: Char): Boolean {
+        val code = c.code
+        return (code in 0x0600..0x06FF) || // Arabic/Persian/Digits
+               (code in 0x0750..0x077F) || // Arabic Supplement
+               (code in 0x08A0..0x08FF) || // Arabic Extended-A
+               (code in 0xFB50..0xFDFF) || // Arabic Presentation Forms-A
+               (code in 0xFE70..0xFEFF)    // Arabic Presentation Forms-B
+    }
+
+    fun isCoreMathChar(c: Char): Boolean {
+        return (c in 'a'..'z') || (c in 'A'..'Z') || (c in '0'..'9') || (c in MATH_SYMBOLS)
+    }
+
+    fun isMathAllowedChar(c: Char): Boolean {
+        return isCoreMathChar(c) || (c in "()[]{}(),.:;!_'\" \t\n")
+    }
+
+    fun canStartMath(c: Char): Boolean {
+        return isCoreMathChar(c) || (c in "([{|")
+    }
+
+    fun canEndMath(c: Char): Boolean {
+        return (c in 'a'..'z') || (c in 'A'..'Z') || (c in '0'..'9') ||
+                (c in MATH_CLOSING_DELIMITERS) || (c in "²³⁴ⁿ⁻⁺⁰¹₂₃₄°π∞Δαβθλμσω")
+    }
+
+    /**
+     * متن را به بخش‌های فارسی و ریاضی/لاتین تقسیم می‌کند و هر بخش ریاضی را با نویسه‌های
+     * LRI (U+2066) در ابتدا و PDI (U+2069) در انتها محصور می‌کند تا در رابط کاربری راست‌چین
+     * چیدمان فرمول‌ها، بازه‌ها و عبارات جبری دقیقاً چپ‌به‌راست و خوانا بماند.
+     */
+    fun formatMathText(input: String?): String {
+        if (input.isNullOrEmpty()) return input ?: ""
+        // حذف ایزوله‌های قبلی در صورت فراخوانی مجدد جهت ایدمپوتنت بودن
+        val text = input.replace(LRI.toString(), "").replace(PDI.toString(), "")
+        val sb = StringBuilder()
+        var i = 0
+        val n = text.length
+
+        while (i < n) {
+            val c = text[i]
+            if (canStartMath(c) && !isPersian(c)) {
+                var j = i
+                var lastValidEnd = -1
+                var hasCoreMath = false
+
+                while (j < n) {
+                    val current = text[j]
+                    if (isPersian(current)) {
+                        break
+                    }
+                    if (!isMathAllowedChar(current)) {
+                        break
+                    }
+                    if (isCoreMathChar(current)) {
+                        hasCoreMath = true
+                    }
+                    if (canEndMath(current) && hasCoreMath) {
+                        lastValidEnd = j
+                    }
+                    j++
+                }
+
+                if (lastValidEnd >= i && hasCoreMath) {
+                    val mathSegment = text.substring(i, lastValidEnd + 1)
+                    sb.append(LRI).append(mathSegment).append(PDI)
+                    i = lastValidEnd + 1
+                    continue
+                }
+            }
+            sb.append(c)
+            i++
+        }
+        return sb.toString()
+    }
 }

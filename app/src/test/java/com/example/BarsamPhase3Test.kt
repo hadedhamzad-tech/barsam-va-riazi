@@ -104,6 +104,10 @@ class BarsamPhase3Test {
                 )
             }
         }
+
+        override suspend fun listModels(apiKey: String): Response<com.example.data.remote.GeminiModelListResponse> {
+            return Response.success(com.example.data.remote.GeminiModelListResponse(emptyList()))
+        }
     }
 
     // ۱. بررسی عدم ارسال هرگونه درخواست در حالت خاموش
@@ -223,7 +227,8 @@ class BarsamPhase3Test {
 
         assertTrue(result is AiAssistantResult.Error)
         val error = result as AiAssistantResult.Error
-        assertEquals("HTTP 429", error.technicalDetail)
+        assertTrue(error.technicalDetail?.startsWith("HTTP 429") == true)
+        assertTrue(error.technicalDetail?.contains("gemini-3.8-flash") == true)
         assertTrue(error.userMessage.contains("سقف مجاز"))
     }
 
