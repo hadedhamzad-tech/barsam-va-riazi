@@ -68,11 +68,12 @@ fun AiAssistantScreen(
 
     val messages by viewModel.chatMessages.collectAsState()
     val isLoading by viewModel.isAiLoading.collectAsState()
+    val aiLoadingStatus by viewModel.aiLoadingStatus.collectAsState()
     val settings by viewModel.appSettings.collectAsState()
     val isAiEnabled = settings?.isAiEnabled ?: false
 
     var inputPrompt by remember { mutableStateOf("") }
-    var isComplexThinking by remember { mutableStateOf(true) } // پیش‌فرض حالت تفکر عمیق برای کنکور
+    var isComplexThinking by remember { mutableStateOf(false) } // پیش‌فرض تفکر عمیق خاموش
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
@@ -184,7 +185,7 @@ fun AiAssistantScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = if (isComplexThinking) "برسام در حال استدلال عمیق و تحلیل ریاضی..." else "در حال دریافت پاسخ...",
+                            text = aiLoadingStatus,
                             fontSize = 12.sp,
                             color = Color.Gray
                         )
@@ -262,25 +263,12 @@ fun ChatBubble(message: MainViewModel.ChatMessage) {
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 if (!isUser) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "دستیار درسی برسام",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = JadeSecondary
-                        )
-                        if (message.modelUsed != null) {
-                            Text(
-                                text = message.modelUsed,
-                                fontSize = 9.sp,
-                                color = Color.Gray
-                            )
-                        }
-                    }
+                    Text(
+                        text = "دستیار درسی برسام",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = JadeSecondary
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
                 }
                 MathText(
@@ -289,6 +277,22 @@ fun ChatBubble(message: MainViewModel.ChatMessage) {
                     color = if (isUser) Color.White else Color.Black,
                     lineHeight = 20.sp
                 )
+                if (!isUser && message.modelUsed != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = message.modelUsed,
+                        fontSize = 10.sp,
+                        color = Color.Gray
+                    )
+                }
+                if (!isUser && message.technicalDetail != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = message.technicalDetail,
+                        fontSize = 10.sp,
+                        color = Color.Gray
+                    )
+                }
             }
         }
     }

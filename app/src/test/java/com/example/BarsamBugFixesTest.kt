@@ -283,15 +283,18 @@ class BarsamBugFixesTest {
         assertEquals(once, twice)
     }
 
-    // تست ۸: شناسه‌های مدل‌های Gemini و مکانیزم پشتیبان Fallback در خطای ۴۰۴ (مشکل ۲)
+    // تست ۸: شناسه‌های مدل‌های Gemini و مکانیزم پشتیبان ترتیبی Fallback (نسخه ۱.۰.۳)
     @Test
     fun `test Gemini model constants and fallback retry on 404`() = runBlocking {
-        assertEquals("gemini-3.8-flash", GeminiAssistantRepository.MODEL_FAST)
-        assertEquals("gemini-3.8-flash", GeminiAssistantRepository.MODEL_REASONING)
+        assertEquals("gemini-3.5-flash", GeminiAssistantRepository.MODEL_FAST)
+        assertEquals("gemini-3.5-flash", GeminiAssistantRepository.MODEL_REASONING)
+        assertEquals(
+            listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"),
+            GeminiAssistantRepository.FALLBACK_MODELS
+        )
 
         var generateCallCount = 0
         var modelUsedInGenerate = ""
-        var listModelsCalled = false
 
         val mockApi = object : GeminiApiService {
             override suspend fun generateContent(
@@ -301,14 +304,14 @@ class BarsamBugFixesTest {
             ): Response<GeminiResponse> {
                 generateCallCount++
                 modelUsedInGenerate = model
-                return if (model == "gemini-3.8-flash") {
-                    // شبیه‌سازی خطای ۴۰۴ برای مدل پیش‌فرض
+                return if (model == "gemini-3.5-flash") {
+                    // شبیه‌سازی خطای ۴۰۴ برای مدل اول
                     Response.error(
                         404,
-                        "{\"error\":\"models/gemini-3.8-flash not found\"}".toResponseBody("application/json".toMediaTypeOrNull())
+                        "{\"error\":\"models/gemini-3.5-flash not found\"}".toResponseBody("application/json".toMediaTypeOrNull())
                     )
-                } else if (model == "gemini-2.5-flash") {
-                    // پاسخ موفق برای مدل fallback
+                } else if (model == "gemini-3.5-flash-lite") {
+                    // پاسخ موفق برای مدل دوم fallback
                     Response.success(
                         GeminiResponse(
                             candidates = listOf(
@@ -326,21 +329,7 @@ class BarsamBugFixesTest {
             }
 
             override suspend fun listModels(apiKey: String): Response<com.example.data.remote.GeminiModelListResponse> {
-                listModelsCalled = true
-                return Response.success(
-                    com.example.data.remote.GeminiModelListResponse(
-                        models = listOf(
-                            com.example.data.remote.GeminiModelInfo(
-                                name = "models/gemini-1.5-flash",
-                                supportedGenerationMethods = listOf("generateContent")
-                            ),
-                            com.example.data.remote.GeminiModelInfo(
-                                name = "models/gemini-2.5-flash",
-                                supportedGenerationMethods = listOf("generateContent")
-                            )
-                        )
-                    )
-                )
+                return Response.success(com.example.data.remote.GeminiModelListResponse(emptyList()))
             }
         }
 
@@ -356,12 +345,11 @@ class BarsamBugFixesTest {
         )
 
         val result = repo.askMathAssistant("سوال تستی")
-        assertTrue("لیست مدل‌ها باید در مواجهه با ۴۰۴ فراخوانی شده باشد", listModelsCalled)
-        assertEquals("درخواست باید دوبار ارسال شده باشد (بار اول مدل پیش‌فرض، بار دوم مدل جایگزین)", 2, generateCallCount)
-        assertEquals("مدل استفاده‌شده در درخواست دوم باید gemini-2.5-flash باشد", "gemini-2.5-flash", modelUsedInGenerate)
+        assertEquals("درخواست باید دوبار ارسال شده باشد (بار اول مدل پیش‌فرض، بار دوم مدل جایگزین دوم)", 2, generateCallCount)
+        assertEquals("مدل استفاده‌شده در درخواست دوم باید gemini-3.5-flash-lite باشد", "gemini-3.5-flash-lite", modelUsedInGenerate)
         assertTrue("نتیجه نهایی پس از پشتیبان باید موفقیت‌آمیز باشد", result is AiAssistantResult.Success)
         val success = result as AiAssistantResult.Success
-        assertEquals("نام مدل جایگزین باید در خروجی ثبت شده باشد", "gemini-2.5-flash", success.modelUsed)
+        assertEquals("نام مدل جایگزین باید در خروجی ثبت شده باشد", "gemini-3.5-flash-lite", success.modelUsed)
     }
 
     @Test

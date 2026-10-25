@@ -60,12 +60,14 @@ class BarsamPhase3Test {
         var shouldTimeout: Boolean = false,
         var shouldThrowCancellation: Boolean = false,
         var errorCode: Int = 200,
-        var responseText: String = "راه حل مرحله به مرحله: x = 2"
+        var responseText: String = "راه حل مرحله به مرحله: x = 2",
+        var customHandler: ((model: String, callCount: Int, request: GeminiRequest) -> Response<GeminiResponse>)? = null
     ) : GeminiApiService {
         var callCount: Int = 0
         var lastModelCalled: String? = null
         var lastApiKeyReceived: String? = null
         var lastRequestReceived: GeminiRequest? = null
+        val modelsCalled = mutableListOf<String>()
 
         override suspend fun generateContent(
             model: String,
@@ -74,8 +76,13 @@ class BarsamPhase3Test {
         ): Response<GeminiResponse> {
             callCount++
             lastModelCalled = model
+            modelsCalled.add(model)
             lastApiKeyReceived = apiKey
             lastRequestReceived = request
+
+            if (customHandler != null) {
+                return customHandler!!(model, callCount, request)
+            }
 
             if (shouldThrowCancellation) {
                 throw CancellationException("Simulated job cancellation")
@@ -131,7 +138,7 @@ class BarsamPhase3Test {
         assertEquals("در حالت خاموش، دقیقاً صفر درخواست باید به شبکه ارسال شود", 0, mockApi.callCount)
     }
 
-    // ۲. بررسی صریح موفقیت درخواست با مدل gemini-4-argon و کلید در هدر
+    // ۲. بررسی صریح موفقیت درخواست با مدل اصلی و کلید در هدر
     @Test
     fun `verify network request made and success returned when AI switch is ON`() = runBlocking {
         val settingsDao = database.settingsDao()
@@ -151,7 +158,6 @@ class BarsamPhase3Test {
 
         val result = repository.askMathAssistant("مشتق x^2", isComplexMath = true)
 
-        // اطمینان قطعی از اینکه نتیجه حتماً Success است (نه Offline یا Error)
         assertTrue("نتیجه درخواست باید حتماً Success باشد", result is AiAssistantResult.Success)
         val success = result as AiAssistantResult.Success
         assertEquals("مشتق تابع برابر با 2x است.", success.reply)
@@ -160,7 +166,7 @@ class BarsamPhase3Test {
         assertEquals("کلید احراز هویت باید به‌درستی به متد ارسال شده باشد", "valid-test-key-789", mockApi.lastApiKeyReceived)
     }
 
-    // ۳. بررسی کنترل‌شده مدیریت Timeout بدون وابستگی به اینترنت واقعی
+    // ۳. بررسی کنترل‌شده مدیریت Timeout با فال‌بک روی هر ۳ مدل
     @Test
     fun `verify controlled handling of SocketTimeoutException`() = runBlocking {
         val settingsDao = database.settingsDao()
@@ -180,8 +186,8 @@ class BarsamPhase3Test {
         assertTrue("در هنگام رخ دادن Timeout نتیجه باید Error باشد", result is AiAssistantResult.Error)
         val error = result as AiAssistantResult.Error
         assertEquals("Timeout", error.technicalDetail)
-        assertTrue(error.userMessage.contains("Timeout") || error.userMessage.contains("طولانی"))
-        assertEquals("سرویس شبکه باید دقیقاً یک بار فراخوانی شده باشد", 1, mockApi.callCount)
+        assertTrue(error.userMessage.contains("Timeout") || error.userMessage.contains("طولانی") || error.userMessage.contains("دیر"))
+        assertEquals("سرویس شبکه باید برای هر ۳ مدل تلاش کرده باشد", 3, mockApi.callCount)
     }
 
     // ۴. بررسی پرتاب مجدد CancellationException جهت حفظ ساختار لغو کوروتین
@@ -203,7 +209,6 @@ class BarsamPhase3Test {
             repository.askMathAssistant("تست لغو درخواست")
             fail("استثنای CancellationException باید مجدداً پرتاب شود و نادیده گرفته نشود")
         } catch (e: CancellationException) {
-            // انتظار می‌رود که استثنا بدون تبدیل به Error به کالبک بازگردد
             assertTrue(e.message?.contains("Simulated job cancellation") == true)
         }
     }
@@ -228,7 +233,7 @@ class BarsamPhase3Test {
         assertTrue(result is AiAssistantResult.Error)
         val error = result as AiAssistantResult.Error
         assertTrue(error.technicalDetail?.startsWith("HTTP 429") == true)
-        assertTrue(error.technicalDetail?.contains("gemini-3.8-flash") == true)
+        assertTrue(error.technicalDetail?.contains("gemini-3.1-flash-lite") == true)
         assertTrue(error.userMessage.contains("سقف مجاز"))
     }
 
@@ -243,7 +248,7 @@ class BarsamPhase3Test {
             context = context,
             settingsDao = settingsDao,
             apiService = mockApi,
-            networkChecker = { false }, // شبیه‌سازی قطع اینترنت
+            networkChecker = { false },
             apiKeyProvider = { "test-api-key" }
         )
 
@@ -251,5 +256,146 @@ class BarsamPhase3Test {
 
         assertTrue(result is AiAssistantResult.Offline)
         assertEquals("وقتی اینترنت قطع است هیچ درخواست شبکه‌ای نباید ارسال شود", 0, mockApi.callCount)
+    }
+
+    // =========================================================================
+    // تست‌های اختصاصی نسخه ۱.۰.۳ (Fallback، حذف thinkingConfig و مدیریت Timeout)
+    // =========================================================================
+
+    // تست جدید ۱: مدل اول تایماوت بدهد، دومی موفق شود → نتیجه Success با نام مدل دوم
+    @Test
+    fun `new test 1 - model 1 timeouts and model 2 succeeds returns success with model 2`() = runBlocking {
+        val settingsDao = database.settingsDao()
+        settingsDao.saveSettings(AppSettingsEntity(id = 1, isAiEnabled = true))
+
+        val mockApi = MockGeminiApiService(
+            customHandler = { model, callCount, _ ->
+                if (callCount == 1) {
+                    throw SocketTimeoutException("First model timeout")
+                } else {
+                    Response.success(
+                        GeminiResponse(
+                            candidates = listOf(
+                                GeminiCandidate(
+                                    content = GeminiContent(
+                                        parts = listOf(GeminiPart("پاسخ مدل دوم"))
+                                    )
+                                )
+                            )
+                        )
+                    )
+                }
+            }
+        )
+        val repo = GeminiAssistantRepository(context, settingsDao, mockApi, { true }, { "valid-key" })
+        var reportedStatus = ""
+        val result = repo.askMathAssistant("مسئله هندسه", onStatusUpdate = { reportedStatus = it })
+
+        assertTrue(result is AiAssistantResult.Success)
+        val success = result as AiAssistantResult.Success
+        assertEquals("gemini-3.5-flash-lite", success.modelUsed)
+        assertEquals("پاسخ مدل دوم", success.reply)
+        assertEquals(2, mockApi.callCount)
+        assertEquals(listOf("gemini-3.5-flash", "gemini-3.5-flash-lite"), mockApi.modelsCalled)
+        assertEquals("مدل اول دیر جواب داد، مدل سریعتر را امتحان میکنم...", reportedStatus)
+    }
+
+    // تست جدید ۲: ۴۰۴ برای مدل اول و دوم، موفق برای سوم → Success با مدل سوم
+    @Test
+    fun `new test 2 - 404 on model 1 and 2 and model 3 succeeds returns success with model 3`() = runBlocking {
+        val settingsDao = database.settingsDao()
+        settingsDao.saveSettings(AppSettingsEntity(id = 1, isAiEnabled = true))
+
+        val mockApi = MockGeminiApiService(
+            customHandler = { model, callCount, _ ->
+                if (callCount < 3) {
+                    Response.error(
+                        404,
+                        "{\"error\":\"not found\"}".toResponseBody("application/json".toMediaTypeOrNull())
+                    )
+                } else {
+                    Response.success(
+                        GeminiResponse(
+                            candidates = listOf(
+                                GeminiCandidate(
+                                    content = GeminiContent(
+                                        parts = listOf(GeminiPart("پاسخ مدل سوم"))
+                                    )
+                                )
+                            )
+                        )
+                    )
+                }
+            }
+        )
+        val repo = GeminiAssistantRepository(context, settingsDao, mockApi, { true }, { "valid-key" })
+        val result = repo.askMathAssistant("مسئله حسابان")
+
+        assertTrue(result is AiAssistantResult.Success)
+        val success = result as AiAssistantResult.Success
+        assertEquals("gemini-3.1-flash-lite", success.modelUsed)
+        assertEquals("پاسخ مدل سوم", success.reply)
+        assertEquals(3, mockApi.callCount)
+        assertEquals(listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"), mockApi.modelsCalled)
+    }
+
+    // تست جدید ۳: ۴۰۰ → هیچ fallback انجام نشود
+    @Test
+    fun `new test 3 - 400 error halts immediately without any fallback`() = runBlocking {
+        val settingsDao = database.settingsDao()
+        settingsDao.saveSettings(AppSettingsEntity(id = 1, isAiEnabled = true))
+
+        val mockApi = MockGeminiApiService(
+            shouldSucceed = false,
+            errorCode = 400
+        )
+        val repo = GeminiAssistantRepository(context, settingsDao, mockApi, { true }, { "valid-key" })
+        val result = repo.askMathAssistant("صورت مسئله اشتباه")
+
+        assertTrue(result is AiAssistantResult.Error)
+        val error = result as AiAssistantResult.Error
+        assertEquals("HTTP 400 - gemini-3.5-flash", error.technicalDetail)
+        assertEquals("روی خطای ۴۰۰ نباید هیچ fallback انجام شود", 1, mockApi.callCount)
+        assertEquals("gemini-3.5-flash", mockApi.lastModelCalled)
+    }
+
+    // تست جدید ۴: هر سه مدل تایماوت → Error با پیام مناسب
+    @Test
+    fun `new test 4 - all three models timeout returns error with appropriate message`() = runBlocking {
+        val settingsDao = database.settingsDao()
+        settingsDao.saveSettings(AppSettingsEntity(id = 1, isAiEnabled = true))
+
+        val mockApi = MockGeminiApiService(shouldTimeout = true)
+        val repo = GeminiAssistantRepository(context, settingsDao, mockApi, { true }, { "valid-key" })
+        val result = repo.askMathAssistant("تایماوت هر ۳ مدل")
+
+        assertTrue(result is AiAssistantResult.Error)
+        val error = result as AiAssistantResult.Error
+        assertEquals("Timeout", error.technicalDetail)
+        assertTrue("پیام باید حاوی دیر جواب دادن باشد", error.userMessage.contains("دیر") || error.userMessage.contains("Timeout"))
+        assertEquals("هر سه مدل باید در تایماوت امتحان شده باشند", 3, mockApi.callCount)
+        assertEquals(listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"), mockApi.modelsCalled)
+    }
+
+    // تست جدید ۵: بررسی اینکه درخواست ارسالی thinkingConfig ندارد
+    @Test
+    fun `new test 5 - verify outgoing request has no thinkingConfig in both fast and reasoning modes`() = runBlocking {
+        val settingsDao = database.settingsDao()
+        settingsDao.saveSettings(AppSettingsEntity(id = 1, isAiEnabled = true))
+
+        val mockApi = MockGeminiApiService(shouldSucceed = true)
+        val repo = GeminiAssistantRepository(context, settingsDao, mockApi, { true }, { "valid-key" })
+
+        // حالت سریع
+        repo.askMathAssistant("سوال سریع", isComplexMath = false)
+        val fastConfig = mockApi.lastRequestReceived?.generationConfig
+        org.junit.Assert.assertNull("thinkingConfig در حالت سریع باید null باشد", fastConfig?.thinkingConfig)
+        assertEquals(0.7f, fastConfig?.temperature ?: 0f, 0.01f)
+
+        // حالت استدلال
+        repo.askMathAssistant("سوال دقیق", isComplexMath = true)
+        val reasoningConfig = mockApi.lastRequestReceived?.generationConfig
+        org.junit.Assert.assertNull("thinkingConfig در حالت استدلال عمیق نیز باید کاملاً null باشد", reasoningConfig?.thinkingConfig)
+        assertEquals(0.4f, reasoningConfig?.temperature ?: 0f, 0.01f)
     }
 }

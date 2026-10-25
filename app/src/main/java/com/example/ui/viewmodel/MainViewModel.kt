@@ -435,7 +435,12 @@ class MainViewModel @JvmOverloads constructor(
     // ==========================================
     // چت و تعامل با دستیار هوشمند Gemini
     // ==========================================
-    data class ChatMessage(val isUser: Boolean, val text: String, val modelUsed: String? = null)
+    data class ChatMessage(
+        val isUser: Boolean,
+        val text: String,
+        val modelUsed: String? = null,
+        val technicalDetail: String? = null
+    )
 
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(
         listOf(
@@ -450,15 +455,21 @@ class MainViewModel @JvmOverloads constructor(
     private val _isAiLoading = MutableStateFlow(false)
     val isAiLoading: StateFlow<Boolean> = _isAiLoading.asStateFlow()
 
+    private val _aiLoadingStatus = MutableStateFlow("در حال دریافت پاسخ...")
+    val aiLoadingStatus: StateFlow<String> = _aiLoadingStatus.asStateFlow()
+
     fun askAiAssistant(questionText: String, isComplexMath: Boolean = false) {
         if (questionText.isBlank() || _isAiLoading.value) return
 
         val userMsg = ChatMessage(isUser = true, text = questionText)
         _chatMessages.value = _chatMessages.value + userMsg
+        _aiLoadingStatus.value = "در حال دریافت پاسخ..."
         _isAiLoading.value = true
 
         viewModelScope.launch {
-            val result = aiRepository.askMathAssistant(questionText, isComplexMath)
+            val result = aiRepository.askMathAssistant(questionText, isComplexMath) { status ->
+                _aiLoadingStatus.value = status
+            }
             _isAiLoading.value = false
 
             val replyMsg = when (result) {
@@ -477,7 +488,8 @@ class MainViewModel @JvmOverloads constructor(
                 )
                 is AiAssistantResult.Error -> ChatMessage(
                     isUser = false,
-                    text = "⚠️ ${result.userMessage}"
+                    text = "⚠️ ${result.userMessage}",
+                    technicalDetail = result.technicalDetail
                 )
             }
             _chatMessages.value = _chatMessages.value + replyMsg

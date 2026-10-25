@@ -43,10 +43,16 @@ class GeminiAssistantRepository(
     companion object {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
-        // شناسه‌های رسمی و متمرکز مدل‌های فعال Gemini:
-        // هر دو حالت به صورت پیش‌فرض از gemini-3.8-flash با سطوح تفکر متفاوت استفاده می‌کنند
-        const val MODEL_FAST = "gemini-3.8-flash"
-        const val MODEL_REASONING = "gemini-3.8-flash"
+        // شناسه‌های رسمی و متمرکز مدل‌های فعال Gemini
+        const val MODEL_FAST = "gemini-3.5-flash"
+        const val MODEL_REASONING = "gemini-3.5-flash"
+
+        // لیست مدل‌های جایگزین به ترتیب اولویت (حداکثر ۳ مدل)
+        val FALLBACK_MODELS = listOf(
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite"
+        )
 
         private val SYSTEM_INSTRUCTION = GeminiContent(
             parts = listOf(
@@ -62,9 +68,9 @@ class GeminiAssistantRepository(
 
         fun createDefaultApiService(): GeminiApiService {
             val okHttpClient = OkHttpClient.Builder()
-                .connectTimeout(60, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
+                .connectTimeout(20, TimeUnit.SECONDS)
+                .readTimeout(45, TimeUnit.SECONDS)
+                .writeTimeout(20, TimeUnit.SECONDS)
                 .build()
 
             val moshi = Moshi.Builder()
@@ -98,10 +104,12 @@ class GeminiAssistantRepository(
     /**
      * ارسال پرسش به دستیار هوشمند برسام
      * به همراه تفکیک کامل لایه‌های آفلاین و آنلاین و جلوگیری قطعی از ارسال درخواست در حالت خاموش
+     * مکانیزم Fallback ترتیبی بین ۳ مدل سریع با مدیریت دقیق Timeout و خطاهای HTTP
      */
     suspend fun askMathAssistant(
         userQuestion: String,
-        isComplexMath: Boolean = false
+        isComplexMath: Boolean = false,
+        onStatusUpdate: (String) -> Unit = {}
     ): AiAssistantResult = withContext(Dispatchers.IO) {
         // ۱. بررسی وضعیت سوییچ تنظیمات: در صورت خاموش بودن، هیچ درخواستی به شبکه ارسال نمی‌شود
         val settings = settingsDao.getSettingsDirect()
@@ -127,19 +135,11 @@ class GeminiAssistantRepository(
             )
         }
 
-        // ۴. انتخاب مدل و پیکربندی بر اساس پیچیدگی مسئله
-        val initialModel = if (isComplexMath) MODEL_REASONING else MODEL_FAST
-        val generationConfig = if (isComplexMath) {
-            GeminiGenerationConfig(
-                temperature = 0.4f,
-                thinkingConfig = GeminiThinkingConfig(thinkingLevel = "high")
-            )
-        } else {
-            GeminiGenerationConfig(
-                temperature = 0.7f,
-                thinkingConfig = GeminiThinkingConfig(thinkingLevel = "low")
-            )
-        }
+        // ۴. پیکربندی دما و حذف کامل thinkingConfig (عدم ارسال thinkingLevel)
+        val generationConfig = GeminiGenerationConfig(
+            temperature = if (isComplexMath) 0.4f else 0.7f,
+            thinkingConfig = null
+        )
 
         val request = GeminiRequest(
             contents = listOf(
@@ -151,79 +151,99 @@ class GeminiAssistantRepository(
             generationConfig = generationConfig
         )
 
-        // ۵. فراخوانی امن با مکانیزم Fallback در صورت بروز خطای ۴۰۴ یا ۴۰۳
-        try {
-            var actualModel = initialModel
-            var response = apiService.generateContent(initialModel, apiKey, request)
+        // ۵. تلاش ترتیبی بین حداکثر ۳ مدل
+        val modelsToTry = FALLBACK_MODELS
+        var lastError: AiAssistantResult.Error? = null
 
-            // در صورت ۴۰۴ یا ۴۰۳، تلاش برای یافتن جدیدترین مدل فعال خانواده flash از models.list
-            if (!response.isSuccessful && (response.code() == 404 || response.code() == 403)) {
-                try {
-                    val listResponse = apiService.listModels(apiKey)
-                    if (listResponse.isSuccessful) {
-                        val availableModels = listResponse.body()?.models ?: emptyList()
-                        val validCandidates = availableModels.filter {
-                            it.supportedGenerationMethods?.contains("generateContent") == true
-                        }
+        for (index in modelsToTry.indices) {
+            val currentModel = modelsToTry[index]
+            if (index > 0) {
+                onStatusUpdate("مدل اول دیر جواب داد، مدل سریعتر را امتحان میکنم...")
+            }
 
-                        // انتخاب جدیدترین مدل خانواده flash
-                        val fallback = validCandidates
-                            .filter { it.name.contains("flash", ignoreCase = true) }
-                            .maxByOrNull { it.name }
-                            ?: validCandidates.maxByOrNull { it.name }
-
-                        if (fallback != null) {
-                            val newModel = fallback.name.removePrefix("models/")
-                            if (newModel != initialModel) {
-                                actualModel = newModel
-                                response = apiService.generateContent(newModel, apiKey, request)
-                            }
-                        }
+            try {
+                val response = apiService.generateContent(currentModel, apiKey, request)
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    val replyText = body?.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    if (!replyText.isNullOrBlank()) {
+                        return@withContext AiAssistantResult.Success(replyText.trim(), currentModel)
+                    } else {
+                        lastError = AiAssistantResult.Error(
+                            "پاسخی از دستیار دریافت نشد. لطفاً پرسش خود را دوباره بیان کنید.",
+                            "Empty - $currentModel"
+                        )
+                        continue
                     }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (ignored: Exception) {
-                    // در صورت خطای دریافت لیست مدل‌ها، پاسخ خطای اصلی ارزیابی می‌شود
-                }
-            }
-
-            if (response.isSuccessful) {
-                val body = response.body()
-                val replyText = body?.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                if (!replyText.isNullOrBlank()) {
-                    AiAssistantResult.Success(replyText.trim(), actualModel)
                 } else {
-                    AiAssistantResult.Error("پاسخی از دستیار دریافت نشد. لطفاً پرسش خود را دوباره بیان کنید.")
+                    val code = response.code()
+                    val technicalDetail = "HTTP $code - $currentModel"
+
+                    // روی ۴۰۰ و ۴۰۱ به هیچ عنوان مدل بعدی امتحان نمی‌شود
+                    if (code == 400 || code == 401) {
+                        val userMsg = if (code == 400) {
+                            "صورت مسئله ارسالی نیاز به شفاف‌سازی دارد (کد ۴۰۰)."
+                        } else {
+                            "خطای احراز هویت در دسترسی به Gemini API با کد ۴۰۱. لطفاً کلید API را بررسی فرمایید."
+                        }
+                        return@withContext AiAssistantResult.Error(userMsg, technicalDetail)
+                    }
+
+                    // بررسی کدهای مجاز برای رفتن به مدل بعدی: ۴۰۴، ۴۰۳، ۵۰۰، ۵۰۲، ۵۰۳، ۴۲۹
+                    val isFallbackCode = code in listOf(404, 403, 500, 502, 503, 429)
+                    val userMsg = when (code) {
+                        403 -> "خطای دسترسی به Gemini API با کد ۴۰۳. لطفاً کلید API یا دسترسی منطقه را بررسی فرمایید."
+                        404 -> "مدل هوش مصنوعی انتخابی ($currentModel) در دسترس نیست یا یافت نشد (کد ۴۰۴)."
+                        429 -> "سقف مجاز درخواست‌های لحظه‌ای پر شده است (کد ۴۲۹). لطفاً چند لحظه بعد تلاش کنید."
+                        500, 502, 503 -> "سرویس هوش مصنوعی در حال حاضر با مشکل مواجه است (کد $code). لطفاً دقایقی دیگر تلاش فرمایید."
+                        else -> "خطایی در دریافت پاسخ از سرویس با کد $code رخ داد."
+                    }
+                    lastError = AiAssistantResult.Error(userMsg, technicalDetail)
+
+                    if (!isFallbackCode) {
+                        return@withContext lastError
+                    }
                 }
-            } else {
-                val code = response.code()
-                val userMsg = when (code) {
-                    400 -> "صورت مسئله ارسالی نیاز به شفاف‌سازی دارد (کد ۴۰۰ - $actualModel)."
-                    401, 403 -> "خطای احراز هویت در دسترسی به Gemini API با کد $code در مدل $actualModel. لطفاً کلید API را بررسی فرمایید."
-                    404 -> "مدل هوش مصنوعی انتخابی ($actualModel) در دسترس نیست یا یافت نشد (کد ۴۰۴)."
-                    429 -> "سقف مجاز درخواست‌های لحظه‌ای پر شده است (کد ۴۲۹ - $actualModel). لطفاً چند لحظه بعد تلاش کنید."
-                    500, 503 -> "سرویس هوش مصنوعی در حال حاضر با بار کاری بالا مواجه است (کد $code - $actualModel). لطفاً دقایقی دیگر تلاش فرمایید."
-                    else -> "خطایی در دریافت پاسخ از سرویس با کد $code در مدل $actualModel رخ داد."
+            } catch (e: CancellationException) {
+                // حفظ ساختار لغو کوروتین و پرتاب مجدد استثنا
+                throw e
+            } catch (e: SocketTimeoutException) {
+                val isConnectTimeout = e.message?.contains("connect", ignoreCase = true) == true
+                lastError = if (isConnectTimeout) {
+                    AiAssistantResult.Error(
+                        "به سرور هوش مصنوعی وصل نشد. اینترنت یا VPN را بررسی کن.",
+                        "Connect Timeout - $currentModel"
+                    )
+                } else {
+                    AiAssistantResult.Error(
+                        "مدل دیر جواب داد. دوباره امتحان کن.",
+                        "Timeout"
+                    )
                 }
-                AiAssistantResult.Error(userMsg, "HTTP $code - $actualModel")
+                // تایماوت مجاز به رفتن به مدل بعدی است
+                continue
+            } catch (e: UnknownHostException) {
+                // عدم اتصال: به سرور وصل نشد
+                return@withContext AiAssistantResult.Error(
+                    "به سرور هوش مصنوعی وصل نشد. اینترنت یا VPN را بررسی کن.",
+                    "UnknownHost"
+                )
+            } catch (e: java.net.ConnectException) {
+                // عدم اتصال: به سرور وصل نشد
+                return@withContext AiAssistantResult.Error(
+                    "به سرور هوش مصنوعی وصل نشد. اینترنت یا VPN را بررسی کن.",
+                    "ConnectException"
+                )
+            } catch (e: Exception) {
+                lastError = AiAssistantResult.Error(
+                    "خطایی در برقراری ارتباط با دستیار رخ داد: ${e.localizedMessage ?: "نامشخص"}",
+                    "Exception: ${e.javaClass.simpleName} - $currentModel"
+                )
             }
-        } catch (e: CancellationException) {
-            // حفظ ساختار لغو کوروتین و پرتاب مجدد استثنا
-            throw e
-        } catch (e: SocketTimeoutException) {
-            AiAssistantResult.Error(
-                "زمان انتظار برای دریافت پاسخ به پایان رسید (Timeout). سرعت اینترنت خود را بررسی کنید.",
-                "Timeout"
-            )
-        } catch (e: UnknownHostException) {
-            AiAssistantResult.Offline(
-                "امکان اتصال به سرور هوش مصنوعی وجود ندارد. لطفاً ارتباط اینترنت خود را بررسی کنید."
-            )
-        } catch (e: Exception) {
-            // بدون افشای کلید یا اطلاعات محرمانه در پیام
-            AiAssistantResult.Error(
-                "خطایی در برقراری ارتباط با دستیار رخ داد: ${e.localizedMessage ?: "نامشخص"}"
-            )
         }
+
+        return@withContext lastError ?: AiAssistantResult.Error(
+            "خطایی در دریافت پاسخ از سرویس رخ داد. لطفاً دوباره تلاش کنید."
+        )
     }
 }
